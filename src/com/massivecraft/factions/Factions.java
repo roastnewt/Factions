@@ -1,191 +1,285 @@
 package com.massivecraft.factions;
 
-import com.massivecraft.factions.adapter.BoardAdapter;
-import com.massivecraft.factions.adapter.BoardMapAdapter;
-import com.massivecraft.factions.adapter.FFlagAdapter;
-import com.massivecraft.factions.adapter.FPermAdapter;
-import com.massivecraft.factions.adapter.FactionPreprocessAdapter;
-import com.massivecraft.factions.adapter.RelAdapter;
-import com.massivecraft.factions.adapter.TerritoryAccessAdapter;
-import com.massivecraft.factions.chat.modifier.ChatModifierLc;
-import com.massivecraft.factions.chat.modifier.ChatModifierLp;
-import com.massivecraft.factions.chat.modifier.ChatModifierParse;
-import com.massivecraft.factions.chat.modifier.ChatModifierRp;
-import com.massivecraft.factions.chat.modifier.ChatModifierUc;
-import com.massivecraft.factions.chat.modifier.ChatModifierUcf;
-import com.massivecraft.factions.chat.tag.ChatTagRelcolor;
-import com.massivecraft.factions.chat.tag.ChatTagRole;
-import com.massivecraft.factions.chat.tag.ChatTagRoleprefix;
-import com.massivecraft.factions.chat.tag.ChatTagName;
-import com.massivecraft.factions.chat.tag.ChatTagNameforce;
-import com.massivecraft.factions.chat.tag.ChatTagRoleprefixforce;
-import com.massivecraft.factions.chat.tag.ChatTagTitle;
-import com.massivecraft.factions.cmd.*;
-import com.massivecraft.factions.entity.Board;
-import com.massivecraft.factions.entity.BoardColls;
-import com.massivecraft.factions.entity.Faction;
-import com.massivecraft.factions.entity.MPlayerColl;
-import com.massivecraft.factions.entity.UConfColls;
-import com.massivecraft.factions.entity.UPlayerColls;
-import com.massivecraft.factions.entity.FactionColls;
-import com.massivecraft.factions.entity.MConfColl;
-import com.massivecraft.factions.integration.herochat.HerochatFeatures;
-import com.massivecraft.factions.integration.lwc.LwcFeatures;
-import com.massivecraft.factions.listeners.FactionsListenerChat;
-import com.massivecraft.factions.listeners.FactionsListenerEcon;
-import com.massivecraft.factions.listeners.FactionsListenerExploit;
-import com.massivecraft.factions.listeners.FactionsListenerMain;
-import com.massivecraft.factions.mixin.PowerMixin;
-import com.massivecraft.factions.mixin.PowerMixinDefault;
-import com.massivecraft.factions.task.TaskPlayerDataRemove;
-import com.massivecraft.factions.task.TaskEconLandReward;
-import com.massivecraft.factions.task.TaskPlayerPowerUpdate;
+import java.io.File;
+import java.lang.reflect.Type;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Level;
 
-import com.massivecraft.mcore.Aspect;
-import com.massivecraft.mcore.AspectColl;
-import com.massivecraft.mcore.MPlugin;
-import com.massivecraft.mcore.Multiverse;
-import com.massivecraft.mcore.util.MUtil;
-import com.massivecraft.mcore.xlib.gson.Gson;
-import com.massivecraft.mcore.xlib.gson.GsonBuilder;
+import org.bukkit.ChatColor;
 
+import org.bukkit.craftbukkit.libs.com.google.gson.reflect.TypeToken;
 
-public class Factions extends MPlugin
+import com.massivecraft.factions.integration.Econ;
+import com.massivecraft.factions.struct.FFlag;
+import com.massivecraft.factions.struct.FPerm;
+import com.massivecraft.factions.struct.Rel;
+import com.massivecraft.factions.util.MiscUtil;
+import com.massivecraft.factions.zcore.persist.EntityCollection;
+import com.massivecraft.factions.zcore.util.TextUtil;
+
+public class Factions extends EntityCollection<Faction>
 {
-	// -------------------------------------------- //
-	// CONSTANTS
-	// -------------------------------------------- //
+	public static Factions i = new Factions();
 	
-	public final static String FACTION_MONEY_ACCOUNT_ID_PREFIX = "faction-"; 
+	P p = P.p;
 	
-	// -------------------------------------------- //
-	// INSTANCE & CONSTRUCT
-	// -------------------------------------------- //
-	
-	private static Factions i;
-	public static Factions get() { return i; }
-	public Factions() { Factions.i = this; }
-	
-	// -------------------------------------------- //
-	// FIELDS
-	// -------------------------------------------- //
-	
-	// Commands
-	private CmdFactions outerCmdFactions;
-	public CmdFactions getOuterCmdFactions() { return this.outerCmdFactions; }
-	
-	// Aspects
-	private Aspect aspect;
-	public Aspect getAspect() { return this.aspect; }
-	public Multiverse getMultiverse() { return this.getAspect().getMultiverse(); }
-	
-	// Database Initialized
-	private boolean databaseInitialized;
-	public boolean isDatabaseInitialized() { return this.databaseInitialized; }
-	
-	// Mixins
-	private PowerMixin powerMixin = null;
-	public PowerMixin getPowerMixin() { return this.powerMixin == null ? PowerMixinDefault.get() : this.powerMixin; }
-	public void setPowerMixin(PowerMixin powerMixin) { this.powerMixin = powerMixin; }
-	
-	// Gson without preprocessors
-	public final Gson gsonWithoutPreprocessors = this.getGsonBuilderWithoutPreprocessors().create();
-
-	// -------------------------------------------- //
-	// OVERRIDE
-	// -------------------------------------------- //
-	
-	@Override
-	public void onEnable()
+	private Factions()
 	{
-		if ( ! preEnable()) return;
-		
-		// Initialize Aspects
-		this.aspect = AspectColl.get().get(Const.ASPECT, true);
-		this.aspect.register();
-		this.aspect.setDesc(
-			"<i>If the factions system even is enabled and how it's configured.",
-			"<i>What factions exists and what players belong to them."
+		super
+		(
+			Faction.class,
+			new CopyOnWriteArrayList<Faction>(),
+			new ConcurrentHashMap<String, Faction>(),
+			new File(P.p.getDataFolder(), "factions.json"),
+			P.p.gson
 		);
-		
-		// Register Faction accountId Extractor
-		// TODO: Perhaps this should be placed in the econ integration somewhere?
-		MUtil.registerExtractor(String.class, "accountId", ExtractorFactionAccountId.get());
-
-		// Initialize Database
-		this.databaseInitialized = false;
-		MConfColl.get().init();
-		MPlayerColl.get().init();
-		UConfColls.get().init();
-		UPlayerColls.get().init();
-		FactionColls.get().init();
-		BoardColls.get().init();
-		FactionColls.get().reindexUPlayers();
-		this.databaseInitialized = true;
-		
-		// Commands
-		this.outerCmdFactions = new CmdFactions();
-		this.outerCmdFactions.register();
-
-		// Setup Listeners
-		FactionsListenerMain.get().setup();
-		FactionsListenerChat.get().setup();
-		FactionsListenerExploit.get().setup();
-		
-		// TODO: This listener is a work in progress.
-		// The goal is that the Econ integration should be completely based on listening to our own events.
-		// Right now only a few situations are handled through this listener.
-		FactionsListenerEcon.get().setup();
-		
-		// Integrate
-		this.integrate(
-			HerochatFeatures.get(),
-			LwcFeatures.get()
-		);
-		
-		// Schedule recurring non-tps-dependent tasks
-		TaskPlayerPowerUpdate.get().activate(this);
-		TaskPlayerDataRemove.get().activate(this);
-		TaskEconLandReward.get().activate(this);
-		
-		// Register built in chat modifiers
-		ChatModifierLc.get().register();
-		ChatModifierLp.get().register();
-		ChatModifierParse.get().register();
-		ChatModifierRp.get().register();
-		ChatModifierUc.get().register();
-		ChatModifierUcf.get().register();
-		
-		// Register built in chat tags
-		ChatTagRelcolor.get().register();
-		ChatTagRole.get().register();
-		ChatTagRoleprefix.get().register();
-		ChatTagRoleprefixforce.get().register();
-		ChatTagName.get().register();
-		ChatTagNameforce.get().register();
-		ChatTagTitle.get().register();
-		
-		postEnable();
-	}
-	
-	public GsonBuilder getGsonBuilderWithoutPreprocessors()
-	{
-		return super.getGsonBuilder()
-		.registerTypeAdapter(TerritoryAccess.class, TerritoryAccessAdapter.get())
-		.registerTypeAdapter(Board.class, BoardAdapter.get())
-		.registerTypeAdapter(Board.MAP_TYPE, BoardMapAdapter.get())
-		.registerTypeAdapter(Rel.class, RelAdapter.get())
-		.registerTypeAdapter(FPerm.class, FPermAdapter.get())
-		.registerTypeAdapter(FFlag.class, FFlagAdapter.get())
-		;
 	}
 	
 	@Override
-	public GsonBuilder getGsonBuilder()
+	public Type getMapType()
 	{
-		return this.getGsonBuilderWithoutPreprocessors()
-		.registerTypeAdapter(Faction.class, FactionPreprocessAdapter.get())
-		;
+		return new TypeToken<Map<String, Faction>>(){}.getType();
 	}
 	
+	@Override
+	public boolean loadFromDisc()
+	{
+		if ( ! super.loadFromDisc()) return false;
+		
+		//----------------------------------------------//
+		// Create Default Special Factions
+		//----------------------------------------------//
+		if ( ! this.exists("0"))
+		{
+			Faction faction = this.create("0");
+			faction.setTag(ChatColor.DARK_GREEN+"Wilderness");
+			faction.setDescription("");
+			this.setFlagsForWilderness(faction);
+		}
+		if ( ! this.exists("-1"))
+		{
+			Faction faction = this.create("-1");
+			faction.setTag("SafeZone");
+			faction.setDescription("Free from PVP and monsters");
+			
+			this.setFlagsForSafeZone(faction);
+		}
+		if ( ! this.exists("-2"))
+		{
+			Faction faction = this.create("-2");
+			faction.setTag("WarZone");
+			faction.setDescription("Not the safest place to be");
+			this.setFlagsForWarZone(faction);
+		}
+		
+		//----------------------------------------------//
+		// Fix From Old Formats
+		//----------------------------------------------//
+		Faction wild = this.get("0");
+		Faction safeZone = this.get("-1");
+		Faction warZone = this.get("-2");
+		
+		// Remove troublesome " " from old pre-1.6.0 names
+		if (safeZone != null && safeZone.getTag().contains(" "))
+			safeZone.setTag("SafeZone");
+		if (warZone != null && warZone.getTag().contains(" "))
+			warZone.setTag("WarZone");
+		
+		// Set Flags if they are not set already.
+		if (wild != null && ! wild.getFlag(FFlag.PERMANENT))
+			setFlagsForWilderness(wild);
+		if (safeZone != null && ! safeZone.getFlag(FFlag.PERMANENT))
+			setFlagsForSafeZone(safeZone);
+		if (warZone != null && ! warZone.getFlag(FFlag.PERMANENT))
+			setFlagsForWarZone(warZone);
+
+		// populate all faction player lists
+		for (Faction faction : i.get())
+		{
+			faction.refreshFPlayers();
+		}
+
+		return true;
+	}
+	
+	//----------------------------------------------//
+	// Flag Setters
+	//----------------------------------------------//
+	public void setFlagsForWilderness(Faction faction)
+	{
+		faction.setOpen(false);
+		
+		faction.setFlag(FFlag.PERMANENT, true);
+		faction.setFlag(FFlag.PEACEFUL, false);
+		faction.setFlag(FFlag.INFPOWER, true);
+		faction.setFlag(FFlag.POWERLOSS, true);
+		faction.setFlag(FFlag.PVP, true);
+		faction.setFlag(FFlag.FRIENDLYFIRE, false);
+		faction.setFlag(FFlag.MONSTERS, true);
+		faction.setFlag(FFlag.EXPLOSIONS, true);
+		faction.setFlag(FFlag.FIRESPREAD, true);
+		//faction.setFlag(FFlag.LIGHTNING, true);
+		faction.setFlag(FFlag.ENDERGRIEF, true);
+		
+		faction.setPermittedRelations(FPerm.BUILD, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.DOOR, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.CONTAINER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.BUTTON, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.LEVER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+	}
+	
+	public void setFlagsForSafeZone(Faction faction)
+	{
+		faction.setOpen(false);
+		
+		faction.setFlag(FFlag.PERMANENT, true);
+		faction.setFlag(FFlag.PEACEFUL, true);
+		faction.setFlag(FFlag.INFPOWER, true);
+		faction.setFlag(FFlag.POWERLOSS, false);
+		faction.setFlag(FFlag.PVP, false);
+		faction.setFlag(FFlag.FRIENDLYFIRE, false);
+		faction.setFlag(FFlag.MONSTERS, false);
+		faction.setFlag(FFlag.EXPLOSIONS, false);
+		faction.setFlag(FFlag.FIRESPREAD, false);
+		//faction.setFlag(FFlag.LIGHTNING, false);
+		faction.setFlag(FFlag.ENDERGRIEF, false);
+		
+		faction.setPermittedRelations(FPerm.DOOR, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.CONTAINER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.BUTTON, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.LEVER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.TERRITORY, Rel.LEADER, Rel.OFFICER, Rel.MEMBER);	
+	}
+	
+	public void setFlagsForWarZone(Faction faction)
+	{
+		faction.setOpen(false);
+		
+		faction.setFlag(FFlag.PERMANENT, true);
+		faction.setFlag(FFlag.PEACEFUL, true);
+		faction.setFlag(FFlag.INFPOWER, true);
+		faction.setFlag(FFlag.POWERLOSS, true);
+		faction.setFlag(FFlag.PVP, true);
+		faction.setFlag(FFlag.FRIENDLYFIRE, true);
+		faction.setFlag(FFlag.MONSTERS, true);
+		faction.setFlag(FFlag.EXPLOSIONS, true);
+		faction.setFlag(FFlag.FIRESPREAD, true);
+		//faction.setFlag(FFlag.LIGHTNING, true);
+		faction.setFlag(FFlag.ENDERGRIEF, true);
+		
+		faction.setPermittedRelations(FPerm.DOOR, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.CONTAINER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.BUTTON, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.LEVER, Rel.LEADER, Rel.OFFICER, Rel.MEMBER, Rel.RECRUIT, Rel.ALLY, Rel.TRUCE, Rel.NEUTRAL, Rel.ENEMY);
+		faction.setPermittedRelations(FPerm.TERRITORY, Rel.LEADER, Rel.OFFICER, Rel.MEMBER);
+	}
+	
+	
+	//----------------------------------------------//
+	// GET
+	//----------------------------------------------//
+	
+	@Override
+	public Faction get(String id)
+	{
+		if ( ! this.exists(id))
+		{
+			p.log(Level.WARNING, "Non existing factionId "+id+" requested! Issuing cleaning!");
+			Board.clean();
+			FPlayers.i.clean();
+		}
+		
+		return super.get(id);
+	}
+	
+	public Faction getNone()
+	{
+		return this.get("0");
+	}
+	
+	//----------------------------------------------//
+	// Faction tag
+	//----------------------------------------------//
+	
+	public static ArrayList<String> validateTag(String str)
+	{
+		ArrayList<String> errors = new ArrayList<String>();
+		
+		if(MiscUtil.getComparisonString(str).length() < Conf.factionTagLengthMin)
+		{
+			errors.add(P.p.txt.parse("<i>The faction tag can't be shorter than <h>%s<i> chars.", Conf.factionTagLengthMin));
+		}
+		
+		if(str.length() > Conf.factionTagLengthMax)
+		{
+			errors.add(P.p.txt.parse("<i>The faction tag can't be longer than <h>%s<i> chars.", Conf.factionTagLengthMax));
+		}
+		
+		for (char c : str.toCharArray())
+		{
+			if ( ! MiscUtil.substanceChars.contains(String.valueOf(c)))
+			{
+				errors.add(P.p.txt.parse("<i>Faction tag must be alphanumeric. \"<h>%s<i>\" is not allowed.", c));
+			}
+		}
+		
+		return errors;
+	}
+	
+	public Faction getByTag(String str)
+	{
+		String compStr = MiscUtil.getComparisonString(str);
+		for (Faction faction : this.get())
+		{
+			if (faction.getComparisonTag().equals(compStr))
+			{
+				return faction;
+			}
+		}
+		return null;
+	}
+	
+	public Faction getBestTagMatch(String searchFor)
+	{
+		Map<String, Faction> tag2faction = new HashMap<String, Faction>();
+		
+		// TODO: Slow index building
+		for (Faction faction : this.get())
+		{
+			tag2faction.put(ChatColor.stripColor(faction.getTag()), faction);
+		}
+		
+		String tag = TextUtil.getBestStartWithCI(tag2faction.keySet(), searchFor);
+		if (tag == null) return null;
+		return tag2faction.get(tag);
+	}
+	
+	public boolean isTagTaken(String str)
+	{
+		return this.getByTag(str) != null;
+	}
+
+	public void econLandRewardRoutine()
+	{
+		if ( ! Econ.shouldBeUsed()) return;
+
+		P.p.log("Running econLandRewardRoutine...");
+		for (Faction faction : this.get())
+		{
+			int landCount = faction.getLandRounded();
+			if (!faction.getFlag(FFlag.PEACEFUL) && landCount > 0)
+			{
+				Set<FPlayer> players = faction.getFPlayers();
+				int playerCount = players.size();
+				double reward = Conf.econLandReward * landCount / playerCount;
+				for (FPlayer player : players)
+				{
+					Econ.modifyMoney(player, reward, "to own faction land", "for faction owning " + landCount + " land divided among " + playerCount + " member(s)");
+				}
+			}
+		}
+	}
+
 }
