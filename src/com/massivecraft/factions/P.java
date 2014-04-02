@@ -123,8 +123,9 @@ public class P extends MPlugin
 			Worldguard.init(this);
 		}
 
-		// start up task which runs the autoLeaveAfterDaysOfInactivity routine
-		startAutoLeaveTask(false);
+		// only auto-kick players on startup
+		FPlayers.i.autoLeaveOnInactivityRoutine();
+		//startAutoLeaveTask(false);
 
 		// start up task which runs the econLandRewardRoutine
 		startEconLandRewardTask(false);
